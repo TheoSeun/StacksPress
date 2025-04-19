@@ -148,3 +148,120 @@
     (ok true)
   )
 )
+
+;; Get content details
+(define-read-only (retrieve-item-details (item-identifier uint))
+  (map-get? curated-items { item-identifier: item-identifier })
+)
+
+;; Get user's vote on a specific content
+(define-read-only (retrieve-participant-appraisal (participant principal) (item-identifier uint))
+  (get appraisal (map-get? participant-appraisals { participant: participant, item-identifier: item-identifier }))
+)
+
+;; Get total number of curated content
+(define-read-only (retrieve-aggregate-submissions)
+  (var-get aggregate-submissions)
+)
+
+;; Get user reputation
+(define-read-only (retrieve-participant-credibility (participant principal))
+  (default-to { metric: 0 } (map-get? participant-credibility { participant: participant }))
+)
+
+;; Get top content (limited by number of items)
+(define-read-only (retrieve-top-items (limit uint))
+  (let
+    (
+      (item-count (var-get aggregate-submissions))
+      (actual-limit (if (> limit item-count) item-count limit))
+    )
+    (filter not-none
+      (map retrieve-item-if-valid (get-item-ids actual-limit))
+    )
+  )
+)
+
+(define-private (not-none (item (optional {
+    originator: principal, 
+    headline: (string-ascii 100), 
+    hyperlink: (string-ascii 200), 
+    topic: (string-ascii 20),
+    publication-epoch: uint, 
+    appraisals: int,
+    gratuities: uint,
+    flags: uint
+  })))
+  (is-some item)
+)
+
+(define-private (retrieve-item-if-valid (id uint))
+  (match (map-get? curated-items { item-identifier: id })
+    item (if (>= (get appraisals item) 0) (some item) none)
+    none
+  )
+)
+
+;; Updated get-item-ids function
+(define-read-only (get-item-ids (count uint))
+  (filter is-non-zero (enumerate count))
+)
+
+;; Updated enumerate function
+(define-private (enumerate (n uint))
+  (let ((limit (if (> n u10) u10 n)))
+    (list
+      (if (>= limit u1) u1 u0)
+      (if (>= limit u2) u2 u0)
+      (if (>= limit u3) u3 u0)
+      (if (>= limit u4) u4 u0)
+      (if (>= limit u5) u5 u0)
+      (if (>= limit u6) u6 u0)
+      (if (>= limit u7) u7 u0)
+      (if (>= limit u8) u8 u0)
+      (if (>= limit u9) u9 u0)
+      (if (>= limit u10) u10 u0)
+    )
+  )
+)
+
+;; Helper function to filter out zero values
+(define-private (is-non-zero (n uint))
+  (not (is-eq n u0))
+)
+
+;; Admin functions
+
+;; Set curation fee
+(define-public (adjust-submission-charge (new-charge uint))
+  (begin
+    (asserts! (is-eq tx-sender PROTOCOL_ADMINISTRATOR) ERR_UNAUTHORIZED_ACCESS)
+    (asserts! (<= new-charge MAX_UINT) ERR_OVERFLOW)
+    (var-set submission-charge new-charge)
+    (print { type: "fee-change", new-charge: new-charge })
+    (ok true)
+  )
+)
+
+;; Remove content (only by contract owner)
+(define-public (expunge-item (item-identifier uint))
+  (begin
+    (asserts! (is-eq tx-sender PROTOCOL_ADMINISTRATOR) ERR_UNAUTHORIZED_ACCESS)
+    (asserts! (item-exists item-identifier) ERR_NONEXISTENT_ITEM)
+    (map-delete curated-items { item-identifier: item-identifier })
+    (print { type: "item-expunged", item-identifier: item-identifier })
+    (ok true)
+  )
+)
+
+;; Add new category
+(define-public (introduce-topic (new-topic (string-ascii 20)))
+  (begin
+    (asserts! (is-eq tx-sender PROTOCOL_ADMINISTRATOR) ERR_UNAUTHORIZED_ACCESS)
+    (asserts! (< (len (var-get content-topics)) u10) ERR_INVALID_TOPIC)
+    (asserts! (>= (len new-topic) u1) ERR_INVALID_TOPIC)
+    (var-set content-topics (unwrap-panic (as-max-len? (append (var-get content-topics) new-topic) u10)))
+    (print { type: "new-topic", topic: new-topic })
+    (ok true)
+  )
+)
